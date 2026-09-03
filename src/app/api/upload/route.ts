@@ -1,29 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase-server";
+import { getSessionUserId } from "@/lib/auth";
+import { saveFile } from "@/lib/storage";
+import { query, queryOne } from "@/lib/db";
 
 export async function GET() {
-  const supabase = await createServerClient();
+  try {
+    const { rows } = await query(
+      "SELECT * FROM uploads ORDER BY created_at DESC"
+    );
 
-  const { data, error } = await supabase
-    .from("uploads")
-    .select("*")
-    .order("created_at", { ascending: false });
-
-  if (error) {
+    return NextResponse.json({ success: true, data: rows });
+  } catch (error) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: (error as Error).message },
       { status: 500 }
     );
   }
-
-  return NextResponse.json({ success: true, data });
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = await createServerClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const userId = await getSessionUserId();
 
-  if (authError || !user) {
+  if (!userId) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401 }
@@ -50,44 +48,28 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Upload to Supabase Storage
+  // Save to the local uploads volume
   const fileName = `${Date.now()}_${file.name}`;
   const storagePath = `statements/${fileName}`;
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const { error: uploadError } = await supabase.storage
-    .from("dataperkom")
-    .upload(storagePath, buffer, {
-      contentType: file.type,
-    });
-
-  if (uploadError) {
-    return NextResponse.json(
-      { success: false, error: uploadError.message },
-      { status: 500 }
-    );
-  }
+  await saveFile(storagePath, buffer);
 
   // Save metadata
-  const { data, error } = await supabase
-    .from("uploads")
-    .insert({
-      period,
-      filename: file.name,
-      file_type: fileExt,
-      storage_path: storagePath,
-      status: "UPLOADED",
-      uploaded_by: user.id,
-    })
-    .select()
-    .single();
+  try {
+    const data = await queryOne(
+      `INSERT INTO uploads
+         (period, filename, file_type, storage_path, status, uploaded_by)
+       VALUES ($1, $2, $3, $4, 'UPLOADED', $5)
+       RETURNING *`,
+      [period, file.name, fileExt, storagePath, userId]
+    );
 
-  if (error) {
+    return NextResponse.json({ success: true, data });
+  } catch (error) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: (error as Error).message },
       { status: 500 }
     );
   }
-
-  return NextResponse.json({ success: true, data });
 }

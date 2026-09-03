@@ -1,57 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase-server";
+import { query } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
-  const supabase = await createServerClient();
   const { searchParams } = new URL(request.url);
 
-  // If requesting distinct periods
-  if (searchParams.get("distinct_periods") === "true") {
-    const { data } = await supabase
-      .from("claims")
-      .select("period")
-      .order("period", { ascending: false });
+  try {
+    // If requesting distinct periods
+    if (searchParams.get("distinct_periods") === "true") {
+      const { rows } = await query(
+        "SELECT DISTINCT period FROM claims ORDER BY period DESC"
+      );
+      return NextResponse.json({
+        success: true,
+        data: rows.map((r) => r.period),
+      });
+    }
 
-    const periods = [...new Set(data?.map((c) => c.period) || [])];
-    return NextResponse.json({ success: true, data: periods });
-  }
+    const search = searchParams.get("search") || "";
+    const status = searchParams.get("status") || "";
+    const period = searchParams.get("period") || "";
 
-  const search = searchParams.get("search") || "";
-  const status = searchParams.get("status") || "";
-  const period = searchParams.get("period") || "";
+    const conditions: string[] = [];
+    const params: unknown[] = [];
 
-  let query = supabase
-    .from("claims")
-    .select("*, employee:employees!claims_employee_id_fkey(*)")
-    .order("updated_at", { ascending: false });
+    if (status) {
+      params.push(status);
+      conditions.push(`c.status = $${params.length}`);
+    }
 
-  if (status) {
-    query = query.eq("status", status);
-  }
+    if (period) {
+      params.push(period);
+      conditions.push(`c.period = $${params.length}`);
+    }
 
-  if (period) {
-    query = query.eq("period", period);
-  }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const { data, error } = await query;
+    const { rows } = await query(
+      `SELECT c.*, to_jsonb(e) AS employee
+       FROM claims c
+       LEFT JOIN employees e ON c.employee_id = e.id
+       ${where}
+       ORDER BY c.updated_at DESC`,
+      params
+    );
 
-  if (error) {
+    // Client-side search filter (employee name/number)
+    let filtered = rows;
+    if (search) {
+      const s = search.toLowerCase();
+      filtered = filtered.filter(
+        (c) =>
+          c.employee?.employee_name?.toLowerCase().includes(s) ||
+          c.employee?.employee_number?.toLowerCase().includes(s)
+      );
+    }
+
+    return NextResponse.json({ success: true, data: filtered });
+  } catch (error) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: (error as Error).message },
       { status: 500 }
     );
   }
-
-  // Client-side search filter (employee name/number)
-  let filtered = data || [];
-  if (search) {
-    const s = search.toLowerCase();
-    filtered = filtered.filter(
-      (c) =>
-        c.employee?.employee_name?.toLowerCase().includes(s) ||
-        c.employee?.employee_number?.toLowerCase().includes(s)
-    );
-  }
-
-  return NextResponse.json({ success: true, data: filtered });
 }

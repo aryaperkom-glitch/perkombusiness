@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { query, queryOne } from "@/lib/db";
 import { z } from "zod";
 
 const publicRegistrationSchema = z.object({
@@ -10,8 +10,6 @@ const publicRegistrationSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const supabase = createServiceClient();
-
   try {
     const body = await request.json();
     const result = publicRegistrationSchema.safeParse(body);
@@ -26,13 +24,10 @@ export async function POST(request: NextRequest) {
     const { employee_name, department, phone_number, signature } = result.data;
 
     // 1. Cek apakah employee sudah ada berdasarkan Nomor Telepon atau Nama
-    // Kita gunakan dua query terpisah untuk mencegah error jika nama atau telepon mengandung koma (yang merusak syntax .or di Supabase)
-    const { data: existingPhone } = await supabase
-      .from("employees")
-      .select("id")
-      .eq("phone_number", phone_number)
-      .limit(1)
-      .maybeSingle();
+    const existingPhone = await queryOne(
+      "SELECT id FROM employees WHERE phone_number = $1 LIMIT 1",
+      [phone_number]
+    );
 
     if (existingPhone) {
       return NextResponse.json(
@@ -41,12 +36,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: existingName } = await supabase
-      .from("employees")
-      .select("id")
-      .ilike("employee_name", employee_name) // gunakan ilike agar case-insensitive
-      .limit(1)
-      .maybeSingle();
+    const existingName = await queryOne(
+      "SELECT id FROM employees WHERE employee_name ILIKE $1 LIMIT 1",
+      [employee_name]
+    );
 
     if (existingName) {
       return NextResponse.json(
@@ -56,46 +49,35 @@ export async function POST(request: NextRequest) {
     }
 
     // Jika belum ada, buat employee baru
-    let employeeId: string;
     const generatedEmpNumber = `EMP-${Math.floor(Date.now() / 1000)}`; // Generate random NIP
-    
-    const { data: newEmp, error: insertError } = await supabase
-      .from("employees")
-      .insert({
-        employee_number: generatedEmpNumber,
-        employee_name,
-        department,
-        phone_number,
-        role: "EMPLOYEE",
-        is_active: true
-      })
-      .select("id")
-      .single();
 
-    if (insertError || !newEmp) {
-      return NextResponse.json(
-        { success: false, error: "Gagal mendaftarkan karyawan baru: " + (insertError?.message || "") },
-        { status: 500 }
-      );
-    }
-    employeeId = newEmp.id;
-
-    // 2. Upsert signature
-    const { error: sigError } = await supabase.from("signatures").upsert(
-      {
-        employee_id: employeeId,
-        signature: signature,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "employee_id" }
+    const newEmp = await queryOne(
+      `INSERT INTO employees
+         (employee_number, employee_name, department, phone_number, role, is_active)
+       VALUES ($1, $2, $3, $4, 'EMPLOYEE', true)
+       RETURNING id`,
+      [generatedEmpNumber, employee_name, department, phone_number]
     );
 
-    if (sigError) {
+    if (!newEmp) {
       return NextResponse.json(
-        { success: false, error: "Gagal menyimpan tanda tangan ke database: " + sigError.message },
+        {
+          success: false,
+          error: "Gagal mendaftarkan karyawan baru: ",
+        },
         { status: 500 }
       );
     }
+    const employeeId = newEmp.id;
+
+    // 2. Upsert signature
+    await query(
+      `INSERT INTO signatures (employee_id, signature, updated_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (employee_id) DO UPDATE
+         SET signature = EXCLUDED.signature, updated_at = EXCLUDED.updated_at`,
+      [employeeId, signature, new Date().toISOString()]
+    );
 
     return NextResponse.json({
       success: true,

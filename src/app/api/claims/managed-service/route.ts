@@ -1,64 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase-server";
+import { getSessionUserId } from "@/lib/auth";
+import { saveFile } from "@/lib/storage";
+import { query, queryOne } from "@/lib/db";
 
 export async function GET() {
-  const supabase = await createServerClient();
+  try {
+    const { rows: data } = await query(
+      "SELECT * FROM managed_service_claims ORDER BY created_at DESC"
+    );
 
-  const { data, error } = await supabase
-    .from("managed_service_claims")
-    .select("*")
-    .order("created_at", { ascending: false });
+    // Fetch pending Grab claims
+    const { rows: grabClaims } = await query(
+      `SELECT c.id, c.total_amount, c.status, c.period, e.employee_name
+       FROM claims c
+       LEFT JOIN employees e ON c.employee_id = e.id
+       WHERE c.status = 'PENDING'`
+    );
 
-  if (error) {
+    // Attach grab_match if customer_name matches employee name
+    const enrichedData = data.map((mClaim) => {
+      let grab_match = null;
+      if (mClaim.customer_name) {
+        const match = grabClaims.find(
+          (gc) =>
+            gc.employee_name &&
+            gc.employee_name.toLowerCase() ===
+              mClaim.customer_name?.toLowerCase()
+        );
+        if (match) {
+          grab_match = match;
+        }
+      }
+      return {
+        ...mClaim,
+        grab_match,
+      };
+    });
+
+    return NextResponse.json({ success: true, data: enrichedData });
+  } catch (error) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: (error as Error).message },
       { status: 500 }
     );
   }
-
-  // Fetch pending Grab claims
-  const { data: grabClaims, error: grabError } = await supabase
-    .from("claims")
-    .select(`
-      id,
-      total_amount,
-      status,
-      period,
-      employee:employees(name)
-    `)
-    .eq("status", "PENDING");
-
-  // Attach grab_match if customer_name matches employee name
-  const enrichedData = data.map((mClaim) => {
-    let grab_match = null;
-    if (grabClaims && mClaim.customer_name) {
-      const match = grabClaims.find(
-        (gc) => {
-          const empName = Array.isArray(gc.employee) ? gc.employee[0]?.name : (gc.employee as any)?.name;
-          return empName && empName.toLowerCase() === mClaim.customer_name?.toLowerCase();
-        }
-      );
-      if (match) {
-        grab_match = match;
-      }
-    }
-    return {
-      ...mClaim,
-      grab_match,
-    };
-  });
-
-  return NextResponse.json({ success: true, data: enrichedData });
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = await createServerClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const userId = await getSessionUserId();
 
-  // If no user is found, we can still allow for now or return 401 if strict
-  // if (authError || !user) {
-  //   return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-  // }
+  if (!userId) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 }
+    );
+  }
 
   const formData = await request.formData();
 
@@ -84,48 +80,37 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Upload to Supabase Storage
+  // Save to the local uploads volume, served by /api/files
   const fileName = `${Date.now()}_ticket_${ticket_id}.${fileExt}`;
-  const storagePath = `claims/managed_service/${fileName}`;
+  const storageKey = `managed-service/${fileName}`;
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const { error: uploadError } = await supabase.storage
-    .from("dataperkom")
-    .upload(storagePath, buffer, {
-      contentType: file.type,
-    });
+  await saveFile(storageKey, buffer);
 
-  if (uploadError) {
-    return NextResponse.json(
-      { success: false, error: uploadError.message },
-      { status: 500 }
-    );
-  }
-  
-  const { data: publicUrlData } = supabase.storage.from("dataperkom").getPublicUrl(storagePath);
-  const fileUrl = publicUrlData.publicUrl;
+  const fileUrl = `/api/files/${storageKey}`;
 
   // Save metadata
-  const { data, error } = await supabase
-    .from("managed_service_claims")
-    .insert({
-      ticket_id,
-      ticket_title,
-      customer_name,
-      location,
-      amount: parseFloat(amount),
-      file_url: fileUrl,
-      status: "pending"
-    })
-    .select()
-    .single();
+  try {
+    const data = await queryOne(
+      `INSERT INTO managed_service_claims
+         (ticket_id, ticket_title, customer_name, location, amount, file_url, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+       RETURNING *`,
+      [
+        ticket_id,
+        ticket_title,
+        customer_name,
+        location,
+        parseFloat(amount),
+        fileUrl,
+      ]
+    );
 
-  if (error) {
+    return NextResponse.json({ success: true, data });
+  } catch (error) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: (error as Error).message },
       { status: 500 }
     );
   }
-
-  return NextResponse.json({ success: true, data });
 }

@@ -2,9 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Employee } from "@/types";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmployeeTable } from "@/components/employees/employee-table";
 import { EmployeeFormDialog } from "@/components/employees/employee-form-dialog";
@@ -63,47 +61,50 @@ export default function EmployeesPage() {
           />
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
+          <button
+            type="button"
+            className="btn btn-outline btn-sm gap-2 rounded-field"
             onClick={() => setImportOpen(true)}
           >
-            <FileUp className="mr-2 h-4 w-4" />
+            <FileUp className="h-4 w-4" />
             Import CSV
-          </Button>
-          <Button onClick={() => setFormOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm gap-2 rounded-field"
+            onClick={() => setFormOpen(true)}
+          >
+            <Plus className="h-4 w-4" />
             Tambah Employee
-          </Button>
+          </button>
         </div>
       </div>
 
       {/* Table */}
-      <Card>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="p-0">
-              <div className="border-b px-4 py-3 flex gap-6">
+      <div className="rounded-box border border-base-300 bg-base-100">
+        {loading ? (
+          <div>
+            <div className="border-b border-base-300 px-4 py-3 flex gap-6">
+              {[60, 140, 100, 120, 80, 60].map((w, i) => (
+                <Skeleton key={i} className="h-4" style={{ width: w }} />
+              ))}
+            </div>
+            {[1, 2, 3, 4, 5, 6].map((row) => (
+              <div key={row} className="border-b border-base-300 px-4 py-4 flex gap-6 items-center">
                 {[60, 140, 100, 120, 80, 60].map((w, i) => (
                   <Skeleton key={i} className="h-4" style={{ width: w }} />
                 ))}
               </div>
-              {[1, 2, 3, 4, 5, 6].map((row) => (
-                <div key={row} className="border-b px-4 py-4 flex gap-6 items-center">
-                  {[60, 140, 100, 120, 80, 60].map((w, i) => (
-                    <Skeleton key={i} className="h-4" style={{ width: w }} />
-                  ))}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmployeeTable
-              employees={employees}
-              onEdit={handleEdit}
-              onRefresh={fetchEmployees}
-            />
-          )}
-        </CardContent>
-      </Card>
+            ))}
+          </div>
+        ) : (
+          <EmployeeTable
+            employees={employees}
+            onEdit={handleEdit}
+            onRefresh={fetchEmployees}
+          />
+        )}
+      </div>
 
       {/* Dialogs */}
       <EmployeeFormDialog

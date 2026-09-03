@@ -1,18 +1,5 @@
 import Link from "next/link";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { ArrowRight } from "lucide-react";
 import { StatusBadge } from "@/components/claims/status-badge";
 import { ClaimWithEmployee } from "@/types";
 import dayjs from "dayjs";
@@ -23,51 +10,58 @@ interface RecentClaimsTableProps {
 
 export function RecentClaimsTable({ claims }: RecentClaimsTableProps) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Recent Claims</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {claims.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-8">
-            Belum ada data claims.
-          </p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Employee</TableHead>
-                <TableHead className="text-right">Total Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Last Update</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+    <div className="rounded-box border border-base-300 bg-base-100">
+      <div className="flex items-center justify-between border-b border-base-300 px-5 py-4">
+        <h2 className="text-base font-semibold">Recent Claims</h2>
+        <Link
+          href="/claims"
+          className="btn btn-ghost btn-sm gap-1 rounded-field text-primary"
+        >
+          View all
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
+      {claims.length === 0 ? (
+        <p className="px-5 py-10 text-center text-sm text-base-content/50">
+          Belum ada data claims.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="table table-sm">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th className="text-right">Total Amount</th>
+                <th>Status</th>
+                <th>Last Update</th>
+              </tr>
+            </thead>
+            <tbody>
               {claims.map((claim) => (
-                <TableRow key={claim.id}>
-                  <TableCell>
+                <tr key={claim.id} className="hover:bg-base-200">
+                  <td>
                     <Link
                       href={`/claims/${claim.id}`}
-                      className="font-medium hover:underline"
+                      className="font-medium hover:text-primary"
                     >
                       {claim.employee?.employee_name || "—"}
                     </Link>
-                  </TableCell>
-                  <TableCell className="text-right font-medium">
+                  </td>
+                  <td className="text-right font-medium tabular-nums">
                     Rp{claim.total_amount.toLocaleString("id-ID")}
-                  </TableCell>
-                  <TableCell>
+                  </td>
+                  <td>
                     <StatusBadge status={claim.status} />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  </td>
+                  <td className="text-base-content/50">
                     {dayjs(claim.updated_at).format("DD MMM YYYY")}
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }

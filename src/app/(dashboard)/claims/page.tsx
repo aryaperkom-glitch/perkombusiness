@@ -3,9 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { ClaimWithEmployee } from "@/types";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -19,12 +17,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/claims/status-badge";
 import {
   Search,
-  Eye,
   Send,
   Download,
   Loader2,
 } from "lucide-react";
-import { toast } from "sonner";
+import dayjs from "dayjs";
 
 export default function ClaimsPage() {
   const [claims, setClaims] = useState<ClaimWithEmployee[]>([]);
@@ -133,118 +130,118 @@ export default function ClaimsPage() {
           </Select>
         </div>
 
-        <Button variant="outline" onClick={handleExport} disabled={exporting}>
+        <button
+          type="button"
+          className="btn btn-outline btn-sm gap-2 rounded-field"
+          onClick={handleExport}
+          disabled={exporting}
+        >
           {exporting ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <Download className="mr-2 h-4 w-4" />
+            <Download className="h-4 w-4" />
           )}
           {exporting ? "Exporting..." : "Export CSV"}
-        </Button>
+        </button>
       </div>
 
       {/* Table */}
-      <Card>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="p-0">
-              {/* Skeleton table header */}
-              <div className="border-b px-4 py-3 flex gap-6">
+      <div className="rounded-box border border-base-300 bg-base-100">
+        {loading ? (
+          <div>
+            {/* Skeleton table header */}
+            <div className="border-b border-base-300 px-4 py-3 flex gap-6">
+              {[100, 140, 100, 60, 80, 80, 60].map((w, i) => (
+                <Skeleton key={i} className="h-4" style={{ width: w }} />
+              ))}
+            </div>
+            {/* Skeleton table rows */}
+            {[1, 2, 3, 4, 5, 6].map((row) => (
+              <div key={row} className="border-b border-base-300 px-4 py-4 flex gap-6 items-center">
                 {[100, 140, 100, 60, 80, 80, 60].map((w, i) => (
                   <Skeleton key={i} className="h-4" style={{ width: w }} />
                 ))}
               </div>
-              {/* Skeleton table rows */}
-              {[1, 2, 3, 4, 5, 6].map((row) => (
-                <div key={row} className="border-b px-4 py-4 flex gap-6 items-center">
-                  {[100, 140, 100, 60, 80, 80, 60].map((w, i) => (
-                    <Skeleton key={i} className="h-4" style={{ width: w }} />
-                  ))}
-                </div>
-              ))}
-            </div>
-          ) : claims.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              Belum ada data claims.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[1000px] border-collapse">
-                <thead>
-                  <tr className="bg-white border-b-2 border-slate-200">
-                    <th className="px-4 py-4 text-left font-semibold text-slate-600 whitespace-nowrap">Date & Time (GMT+7)</th>
-                    <th className="px-4 py-4 text-left font-semibold text-slate-600 whitespace-nowrap">Employee Name</th>
-                    <th className="px-4 py-4 text-left font-semibold text-slate-600 whitespace-nowrap">Phone</th>
-                    <th className="px-4 py-4 text-center font-semibold text-slate-600 whitespace-nowrap">Trips</th>
-                    <th className="px-4 py-4 text-right font-semibold text-slate-600 whitespace-nowrap">Total Fare</th>
-                    <th className="px-4 py-4 text-left font-semibold text-slate-600 whitespace-nowrap">Mgr Status</th>
-                    <th className="px-4 py-4 text-left font-semibold text-slate-600 whitespace-nowrap">HR Status</th>
-                    <th className="px-4 py-4 text-left font-semibold text-slate-600 whitespace-nowrap">System Status</th>
-                    <th className="px-4 py-4 text-left font-semibold text-slate-600 whitespace-nowrap w-24">Action</th>
+            ))}
+          </div>
+        ) : claims.length === 0 ? (
+          <div className="py-12 text-center text-sm text-base-content/50">
+            Belum ada data claims.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="table table-sm min-w-[1000px]">
+              <thead>
+                <tr>
+                  <th className="whitespace-nowrap">Date &amp; Time (GMT+7)</th>
+                  <th className="whitespace-nowrap">Employee Name</th>
+                  <th className="whitespace-nowrap">Phone</th>
+                  <th className="text-center whitespace-nowrap">Trips</th>
+                  <th className="text-right whitespace-nowrap">Total Fare</th>
+                  <th className="whitespace-nowrap">Mgr Status</th>
+                  <th className="whitespace-nowrap">HR Status</th>
+                  <th className="whitespace-nowrap">System Status</th>
+                  <th className="w-24 whitespace-nowrap">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {claims.map((claim) => (
+                  <tr key={claim.id} className="hover:bg-base-200">
+                    <td className="whitespace-nowrap text-xs text-base-content/60">
+                      {claim.created_at
+                        ? dayjs(claim.created_at).format("DD MMM YYYY, HH:mm")
+                        : "—"}
+                    </td>
+                    <td className="font-medium">
+                      {claim.employee?.employee_name || "—"}
+                    </td>
+                    <td className="text-base-content/60">
+                      {claim.employee?.phone_number || "—"}
+                    </td>
+                    <td className="text-center tabular-nums">
+                      {claim.trip_count}
+                    </td>
+                    <td className="text-right font-medium tabular-nums">
+                      IDR {claim.total_amount.toLocaleString("id-ID")}
+                    </td>
+                    <td>
+                      <StatusBadge status={claim.manager_status as any} />
+                    </td>
+                    <td>
+                      <StatusBadge status={claim.hr_status as any} />
+                    </td>
+                    <td>
+                      <StatusBadge status={claim.status} />
+                    </td>
+                    <td>
+                      <div className="flex gap-1.5">
+                        <Link
+                          href={`/claims/${claim.id}`}
+                          className="btn btn-ghost btn-xs h-7 rounded-field px-2 text-xs"
+                        >
+                          Detail
+                        </Link>
+                        {claim.employee &&
+                          (claim.status === "PENDING" ||
+                            claim.status === "SENT") && (
+                            <button
+                              type="button"
+                              className="btn btn-outline btn-xs h-7 gap-1 rounded-field px-2 text-xs"
+                              onClick={() => handleSendWA(claim)}
+                            >
+                              <Send className="h-3 w-3" />
+                              Send
+                            </button>
+                          )}
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {claims.map((claim) => (
-                    <tr key={claim.id} className="hover:bg-slate-50/50 transition-colors border-b border-slate-100">
-                      <td className="px-4 py-4 align-middle text-slate-500 text-xs">
-                        11 Jun 2026,<br/>12:00:00 PM
-                      </td>
-                      <td className="px-4 py-4 font-medium align-middle text-slate-800">
-                        {claim.employee?.employee_name || "—"}
-                      </td>
-                      <td className="px-4 py-4 text-slate-500 align-middle">
-                        {claim.employee?.phone_number || "—"}
-                      </td>
-                      <td className="px-4 py-4 text-center align-middle text-slate-600">
-                        {claim.trip_count}
-                      </td>
-                      <td className="px-4 py-4 text-right font-medium text-slate-800 align-middle">
-                        IDR {claim.total_amount.toLocaleString("id-ID")}
-                      </td>
-                      <td className="px-4 py-4 align-middle">
-                        <StatusBadge status={claim.manager_status as any} />
-                      </td>
-                      <td className="px-4 py-4 align-middle">
-                        <StatusBadge status={claim.hr_status as any} />
-                      </td>
-                      <td className="px-4 py-4 align-middle">
-                        <StatusBadge status={claim.status} />
-                      </td>
-                      <td className="px-4 py-4 align-middle">
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 px-2 text-xs"
-                            asChild
-                          >
-                            <Link href={`/claims/${claim.id}`}>
-                              Detail
-                            </Link>
-                          </Button>
-                          {claim.employee &&
-                            (claim.status === "PENDING" ||
-                              claim.status === "SENT") && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 px-2 text-xs"
-                                onClick={() => handleSendWA(claim)}
-                              >
-                                <Send className="h-3 w-3 mr-1" />
-                                Send
-                              </Button>
-                            )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <SendWADialog
         open={sendWADialogOpen}

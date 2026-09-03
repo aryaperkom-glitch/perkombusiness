@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase-server";
+import { query, queryOne } from "@/lib/db";
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createServerClient();
     const { managedClaimId, grabClaimId } = await request.json();
 
     if (!managedClaimId || !grabClaimId) {
@@ -14,57 +13,58 @@ export async function POST(request: NextRequest) {
     }
 
     // 1. Fetch managed_service_claim
-    const { data: managedClaim, error: mError } = await supabase
-      .from("managed_service_claims")
-      .select("id, amount")
-      .eq("id", managedClaimId)
-      .single();
+    const managedClaim = await queryOne(
+      "SELECT id, amount FROM managed_service_claims WHERE id = $1",
+      [managedClaimId]
+    );
 
-    if (mError || !managedClaim) {
-      return NextResponse.json({ success: false, error: "Managed Claim not found" }, { status: 404 });
+    if (!managedClaim) {
+      return NextResponse.json(
+        { success: false, error: "Managed Claim not found" },
+        { status: 404 }
+      );
     }
 
     // 2. Fetch Grab claim
-    const { data: grabClaim, error: gError } = await supabase
-      .from("claims")
-      .select("id, total_amount, status")
-      .eq("id", grabClaimId)
-      .single();
+    const grabClaim = await queryOne(
+      "SELECT id, total_amount, status FROM claims WHERE id = $1",
+      [grabClaimId]
+    );
 
-    if (gError || !grabClaim) {
-      return NextResponse.json({ success: false, error: "Grab Claim not found" }, { status: 404 });
+    if (!grabClaim) {
+      return NextResponse.json(
+        { success: false, error: "Grab Claim not found" },
+        { status: 404 }
+      );
     }
 
     if (grabClaim.status === "MERGED") {
-      return NextResponse.json({ success: false, error: "Grab Claim is already merged" }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: "Grab Claim is already merged" },
+        { status: 400 }
+      );
     }
 
     // 3. Update managed_service_claim amount
     const newAmount = Number(managedClaim.amount) + Number(grabClaim.total_amount);
-    const { error: updateError } = await supabase
-      .from("managed_service_claims")
-      .update({ amount: newAmount })
-      .eq("id", managedClaimId);
-
-    if (updateError) {
-      throw new Error("Failed to update managed claim amount");
-    }
+    await query("UPDATE managed_service_claims SET amount = $1 WHERE id = $2", [
+      newAmount,
+      managedClaimId,
+    ]);
 
     // 4. Update grab claim status
-    const { error: grabUpdateError } = await supabase
-      .from("claims")
-      .update({ status: "MERGED" })
-      .eq("id", grabClaimId);
+    await query("UPDATE claims SET status = 'MERGED' WHERE id = $1", [
+      grabClaimId,
+    ]);
 
-    if (grabUpdateError) {
-      throw new Error("Failed to update grab claim status");
-    }
-
-    return NextResponse.json({ success: true, message: "Successfully merged claims" });
-  } catch (error: any) {
+    return NextResponse.json({
+      success: true,
+      message: "Successfully merged claims",
+    });
+  } catch (error) {
     console.error("Merge error:", error);
     return NextResponse.json(
-      { success: false, error: error.message || "Internal server error" },
+      { success: false, error: (error as Error).message || "Internal server error" },
       { status: 500 }
     );
   }

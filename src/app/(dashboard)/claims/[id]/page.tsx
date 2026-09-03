@@ -1,6 +1,6 @@
-import { createServerClient, createServiceClient } from "@/lib/supabase-server";
 import { notFound } from "next/navigation";
-import { ClaimDetail } from "@/types";
+import { query, queryOne } from "@/lib/db";
+import { ClaimDetail, Trip, Comment } from "@/types";
 import { ClaimDetailView } from "@/components/claims/claim-detail";
 
 interface ClaimDetailPageProps {
@@ -9,45 +9,43 @@ interface ClaimDetailPageProps {
 
 export default async function ClaimDetailPage({ params }: ClaimDetailPageProps) {
   const { id } = await params;
-  const supabase = await createServerClient();
-  const serviceClient = createServiceClient();
 
   // Fetch claim with employee
-  const { data: claim, error } = await supabase
-    .from("claims")
-    .select("*, employee:employees!claims_employee_id_fkey(*)")
-    .eq("id", id)
-    .single();
+  const claim = await queryOne(
+    `SELECT c.*, to_jsonb(e) AS employee
+     FROM claims c
+     LEFT JOIN employees e ON c.employee_id = e.id
+     WHERE c.id = $1`,
+    [id]
+  );
 
-  if (error || !claim) {
+  if (!claim) {
     notFound();
   }
 
   // Fetch trips
-  const { data: trips } = await supabase
-    .from("trips")
-    .select("*")
-    .eq("claim_id", id)
-    .order("trip_date", { ascending: true });
+  const { rows: trips } = await query(
+    "SELECT * FROM trips WHERE claim_id = $1 ORDER BY trip_date ASC",
+    [id]
+  );
 
   // Fetch comments
-  const { data: comments } = await supabase
-    .from("comments")
-    .select("*")
-    .eq("claim_id", id)
-    .order("created_at", { ascending: true });
+  const { rows: comments } = await query(
+    "SELECT * FROM comments WHERE claim_id = $1 ORDER BY created_at ASC",
+    [id]
+  );
 
   let ticket = null;
   if (claim.employee?.employee_name) {
-    const { data: tickets } = await supabase
-      .from("managed_service_claims")
-      .select("*")
-      .ilike("customer_name", claim.employee.employee_name)
-      .order("created_at", { ascending: false })
-      .limit(1);
-    
-    if (tickets && tickets.length > 0) {
-      ticket = tickets[0];
+    const tickets = await queryOne(
+      `SELECT * FROM managed_service_claims
+       WHERE customer_name ILIKE $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [claim.employee.employee_name]
+    );
+
+    if (tickets) {
+      ticket = tickets;
     } else if (claim.status === 'APPROVED') {
       ticket = {
         ticket_id: "32535",
@@ -66,45 +64,42 @@ export default async function ClaimDetailPage({ params }: ClaimDetailPageProps) 
   // Fetch employee signature
   let employee_signature = null;
   if (employeeIdToUse) {
-    const { data: empSig } = await serviceClient
-      .from("signatures")
-      .select("signature")
-      .eq("employee_id", employeeIdToUse)
-      .single();
+    const empSig = await queryOne(
+      "SELECT signature FROM signatures WHERE employee_id = $1",
+      [employeeIdToUse]
+    );
     if (empSig) employee_signature = empSig.signature;
   }
 
   // Fetch manager signature
   let manager_signature = null;
   if (managerIdToUse) {
-    const { data: managerSig } = await serviceClient
-      .from("signatures")
-      .select("signature")
-      .eq("employee_id", managerIdToUse)
-      .single();
+    const managerSig = await queryOne(
+      "SELECT signature FROM signatures WHERE employee_id = $1",
+      [managerIdToUse]
+    );
     if (managerSig) manager_signature = managerSig.signature;
   }
 
   // Fetch HR signature
   let hr_signature = null;
   if (hrIdToUse) {
-    const { data: hrSig } = await serviceClient
-      .from("signatures")
-      .select("signature")
-      .eq("employee_id", hrIdToUse)
-      .single();
+    const hrSig = await queryOne(
+      "SELECT signature FROM signatures WHERE employee_id = $1",
+      [hrIdToUse]
+    );
     if (hrSig) hr_signature = hrSig.signature;
   }
 
-  const claimDetail: ClaimDetail = {
+  const claimDetail = {
     ...claim,
-    trips: trips || [],
-    comments: comments || [],
+    trips: (trips || []) as Trip[],
+    comments: (comments || []) as Comment[],
     ticket,
     manager_signature,
     hr_signature,
-    employee_signature
-  };
+    employee_signature,
+  } as ClaimDetail;
 
   return <ClaimDetailView claim={claimDetail} />;
 }

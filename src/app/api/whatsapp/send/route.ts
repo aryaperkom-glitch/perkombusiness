@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase-server";
+import { query } from "@/lib/db";
+import { getClaimWithRelations } from "@/lib/claims";
 import { sendTextMessage, buildClaimMessage, buildManagerApprovalMessage, buildHrApprovalMessage } from "@/lib/whatsapp";
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createServerClient();
     const { claim_id, manager_id, hr_id, target = "EMPLOYEE" } = await request.json();
 
     if (!claim_id) {
@@ -15,19 +15,9 @@ export async function POST(request: NextRequest) {
   }
 
   // Get claim with employee, manager, hr, and trips
-  const { data: claim, error: claimError } = await supabase
-    .from("claims")
-    .select(`
-      *,
-      employee:employees!claims_employee_id_fkey(*),
-      manager:employees!claims_manager_id_fkey(*),
-      hr:employees!claims_hr_id_fkey(*),
-      trips(*)
-    `)
-    .eq("id", claim_id)
-    .single();
+  const claim = await getClaimWithRelations(claim_id);
 
-  if (claimError || !claim) {
+  if (!claim) {
     return NextResponse.json(
       { success: false, error: "Claim tidak ditemukan" },
       { status: 404 }
@@ -87,13 +77,17 @@ export async function POST(request: NextRequest) {
   const result = await sendTextMessage(normalizedPhone, message);
 
   // Log the attempt
-  await supabase.from("whatsapp_logs").insert({
-    claim_id,
-    phone_number: phoneNumber,
-    message_type: messageType,
-    status: result.success ? "SENT" : "FAILED",
-    response: JSON.stringify(result),
-  });
+  await query(
+    `INSERT INTO whatsapp_logs (claim_id, phone_number, message_type, status, response)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [
+      claim_id,
+      phoneNumber,
+      messageType,
+      result.success ? "SENT" : "FAILED",
+      JSON.stringify(result),
+    ]
+  );
 
   if (!result.success) {
     return NextResponse.json(
@@ -104,23 +98,28 @@ export async function POST(request: NextRequest) {
 
   // Only update general claim status if sending to EMPLOYEE
   if (target === "EMPLOYEE") {
-    await supabase
-      .from("claims")
-      .update({
-        status: "SENT",
-        manager_id: manager_id !== undefined ? manager_id : claim.employee.manager_id,
-        hr_id: hr_id !== undefined ? hr_id : claim.employee.hr_id,
-        wa_sent: true,
-        wa_sent_at: new Date().toISOString(),
-      })
-      .eq("id", claim_id);
+    await query(
+      `UPDATE claims SET
+         status = 'SENT',
+         manager_id = $1,
+         hr_id = $2,
+         wa_sent = true,
+         wa_sent_at = $3
+       WHERE id = $4`,
+      [
+        manager_id !== undefined ? manager_id : claim.employee.manager_id,
+        hr_id !== undefined ? hr_id : claim.employee.hr_id,
+        new Date().toISOString(),
+        claim_id,
+      ]
+    );
   }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Unhandled error in /api/whatsapp/send:", error);
     return NextResponse.json(
-      { success: false, error: error.message || "Internal Server Error" },
+      { success: false, error: (error as Error).message || "Internal Server Error" },
       { status: 500 }
     );
   }

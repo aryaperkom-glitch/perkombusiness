@@ -2,6 +2,48 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+@plugin "daisyui" {
+  themes: false;
+  logs: false;
+}
+
+/* PERKOM enterprise theme — see DESIGN.md */
+@plugin "daisyui/theme" {
+  name: "perkom";
+  default: true;
+  color-scheme: light;
+
+  --color-base-100: #ffffff;
+  --color-base-200: #f6f7f9;
+  --color-base-300: #e3e6ea;
+  --color-base-content: #1c2733;
+  --color-primary: #2b5ce6;
+  --color-primary-content: #ffffff;
+  --color-secondary: #0f2a5e;
+  --color-secondary-content: #ffffff;
+  --color-accent: #2b5ce6;
+  --color-accent-content: #ffffff;
+  --color-neutral: #3f4550;
+  --color-neutral-content: #ffffff;
+  --color-info: #2e7dd1;
+  --color-info-content: #ffffff;
+  --color-success: #178a50;
+  --color-success-content: #ffffff;
+  --color-warning: #b4730e;
+  --color-warning-content: #1c2733;
+  --color-error: #c13b3b;
+  --color-error-content: #ffffff;
+
+  --radius-selector: 0.25rem;
+  --radius-field: 0.375rem;
+  --radius-box: 0.5rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

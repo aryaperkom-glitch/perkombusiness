@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-officeless}
+      POSTGRES_USER: ${POSTGRES_USER:-officeless}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      # postgres:18+ requires a single mount at /var/lib/postgresql (data lands in 18/docker)
+      - postgres_data:/var/lib/postgresql
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    # Local access for host tools (DBeaver/pgAdmin) only; not exposed beyond this machine
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-officeless} -d ${POSTGRES_DB:-officeless}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      # Inside the Docker network the database is reachable via the service name "db"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-officeless}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-officeless}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      SERVICEDESK_USERNAME: ${SERVICEDESK_USERNAME:-}
+      SERVICEDESK_PASSWORD: ${SERVICEDESK_PASSWORD:-}
+      KIRIMI_USER_CODE: ${KIRIMI_USER_CODE:-}
+      KIRIMI_SECRET: ${KIRIMI_SECRET:-}
+      KIRIMI_DEVICE_ID: ${KIRIMI_DEVICE_ID:-}
+    volumes:
+      # Host bind mount so uploads are trivially backupable/rsync-able
+      - ./storage/uploads:/app/uploads
+    ports:
+      # Localhost only — nginx / Cloudflare Tunnel fronts this in production
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

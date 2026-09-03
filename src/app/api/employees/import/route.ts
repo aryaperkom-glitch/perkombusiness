@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase-server";
+import { query } from "@/lib/db";
 import Papa from "papaparse";
 
 export async function POST(request: NextRequest) {
-  const supabase = await createServerClient();
   const formData = await request.formData();
   const file = formData.get("file") as File | null;
 
@@ -53,16 +52,35 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { error } = await supabase
-    .from("employees")
-    .upsert(employees, {
-      onConflict: "employee_number",
-      ignoreDuplicates: false,
-    });
+  try {
+    const values = employees
+      .map((_, i) => {
+        const b = i * 5;
+        return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5})`;
+      })
+      .join(", ");
+    const params = employees.flatMap((e) => [
+      e.employee_number,
+      e.employee_name,
+      e.department,
+      e.phone_number,
+      e.is_active,
+    ]);
 
-  if (error) {
+    await query(
+      `INSERT INTO employees
+         (employee_number, employee_name, department, phone_number, is_active)
+       VALUES ${values}
+       ON CONFLICT (employee_number) DO UPDATE SET
+         employee_name = EXCLUDED.employee_name,
+         department = EXCLUDED.department,
+         phone_number = EXCLUDED.phone_number,
+         is_active = EXCLUDED.is_active`,
+      params
+    );
+  } catch (error) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: (error as Error).message },
       { status: 500 }
     );
   }

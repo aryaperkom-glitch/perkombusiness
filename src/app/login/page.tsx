@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 import { useState } from "react";
-import { createBrowserClient } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +10,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 
@@ -27,13 +25,13 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const supabase = createBrowserClient();
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
       });
 
-      if (error) {
+      if (!res.ok) {
         setError("Email atau password salah.");
         return;
       }

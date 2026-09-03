@@ -1,75 +1,69 @@
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { DashboardSummary } from "@/types";
-import {
   Users,
   FileText,
   Clock,
   CheckCircle,
   AlertCircle,
 } from "lucide-react";
+import { DashboardSummary } from "@/types";
 
 interface SummaryCardsProps {
   summary: DashboardSummary;
+  claimsThisMonth: number;
 }
 
-const cards = [
-  {
-    key: "total_employees" as const,
-    title: "Total Employees",
-    icon: Users,
-    color: "text-blue-600",
-    bg: "bg-blue-50",
-  },
-  {
-    key: "total_claims" as const,
-    title: "Total Claims",
-    icon: FileText,
-    color: "text-slate-600",
-    bg: "bg-slate-50",
-  },
-  {
-    key: "pending_claims" as const,
-    title: "Pending",
-    icon: Clock,
-    color: "text-amber-600",
-    bg: "bg-amber-50",
-  },
-  {
-    key: "approved_claims" as const,
-    title: "Approved",
-    icon: CheckCircle,
-    color: "text-emerald-600",
-    bg: "bg-emerald-50",
-  },
-  {
-    key: "need_review_claims" as const,
-    title: "Need Review",
-    icon: AlertCircle,
-    color: "text-orange-600",
-    bg: "bg-orange-50",
-  },
-];
+export function SummaryCards({ summary, claimsThisMonth }: SummaryCardsProps) {
+  const cards = [
+    {
+      key: "total_employees" as const,
+      title: "Total Employees",
+      desc: "active",
+      icon: Users,
+    },
+    {
+      key: "total_claims" as const,
+      title: "Total Claims",
+      desc: claimsThisMonth > 0 ? `${claimsThisMonth} this month` : "",
+      icon: FileText,
+    },
+    {
+      key: "pending_claims" as const,
+      title: "Pending",
+      desc: "",
+      icon: Clock,
+    },
+    {
+      key: "approved_claims" as const,
+      title: "Approved",
+      desc: "",
+      icon: CheckCircle,
+    },
+    {
+      key: "need_review_claims" as const,
+      title: "Need Review",
+      desc: "",
+      icon: AlertCircle,
+    },
+  ];
 
-export function SummaryCards({ summary }: SummaryCardsProps) {
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
       {cards.map((card) => (
-        <Card key={card.key}>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {card.title}
-            </CardTitle>
-            <card.icon className={`h-4 w-4 ${card.color}`} />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{summary[card.key]}</div>
-          </CardContent>
-        </Card>
+        <div
+          key={card.key}
+          className="rounded-box border border-base-300 bg-base-100 p-4"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="text-xs text-base-content/50">{card.title}</div>
+            <card.icon className="h-4 w-4 shrink-0 text-base-content/30" />
+          </div>
+          <div className="mt-2 text-2xl font-bold tabular-nums text-base-content">
+            {summary[card.key]}
+          </div>
+          {card.desc && (
+            <div className="mt-1 text-xs text-base-content/50">{card.desc}</div>
+          )}
+        </div>
       ))}
     </div>
   );

@@ -1,10 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
-import { Loader2, RefreshCw, Download, Calendar as CalendarIcon, ChevronsUpDown } from "lucide-react";
+import { Loader2, RefreshCw, Download, ChevronsUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -151,21 +148,21 @@ export default function ServicesPage() {
   };
 
   const TableHeader = ({ title }: { title: string }) => (
-    <th className="px-3 py-3 text-left font-semibold text-slate-700 whitespace-nowrap border border-slate-300 bg-slate-100">
-      <div className="flex items-center justify-between gap-2">
+    <th className="whitespace-nowrap bg-base-200 font-semibold text-base-content">
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5 text-left">
         <span>{title}</span>
-        <ChevronsUpDown className="h-3 w-3 text-slate-400" />
+        <ChevronsUpDown className="h-3 w-3 text-base-content/40" />
       </div>
     </th>
   );
 
   return (
-    <div className="space-y-6">
-      {/* Top Filter Bar - Matches screenshot top area */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-3 rounded-md border border-slate-200 shadow-sm">
+    <div className="space-y-4">
+      {/* Top Filter Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-box border border-base-300 bg-base-100 p-3">
         <div className="flex gap-2">
           <Select value={dateFilter} onValueChange={setDateFilter}>
-            <SelectTrigger className="w-[140px] h-9 bg-slate-50 border-slate-300">
+            <SelectTrigger className="h-9 w-[140px]">
               <SelectValue placeholder="Date filter" />
             </SelectTrigger>
             <SelectContent>
@@ -176,44 +173,54 @@ export default function ServicesPage() {
             </SelectContent>
           </Select>
 
-          <Button variant="outline" size="sm" onClick={downloadCSV} className="h-9 border-slate-300 bg-slate-50">
+          <button
+            type="button"
+            className="btn btn-outline btn-sm h-9 rounded-field"
+            onClick={downloadCSV}
+          >
+            <Download className="h-4 w-4" />
             Export
-          </Button>
+          </button>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="text-sm text-slate-600 flex items-center gap-2">
-            From 
-            <input 
-              type="date" 
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-sm text-base-content">
+            From
+            <input
+              type="date"
               value={fromDate}
               onChange={(e) => setFromDate(e.target.value)}
-              className="border border-slate-300 bg-slate-50 rounded px-2 py-1 h-9 flex items-center min-w-[120px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" 
+              className="input input-sm min-w-[120px] rounded-field"
             />
-            To 
-            <input 
-              type="date" 
+            To
+            <input
+              type="date"
               value={toDate}
               onChange={(e) => setToDate(e.target.value)}
-              className="border border-slate-300 bg-slate-50 rounded px-2 py-1 h-9 flex items-center min-w-[120px] text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" 
+              className="input input-sm min-w-[120px] rounded-field"
             />
           </div>
-          <Button onClick={fetchServiceData} disabled={loading} variant="outline" size="sm" className="h-9 border-slate-300">
-            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          <button
+            type="button"
+            className="btn btn-outline btn-sm h-9 gap-2 rounded-field"
+            onClick={fetchServiceData}
+            disabled={loading}
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
-          </Button>
+          </button>
         </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="bg-white border-slate-200 border rounded-sm">
-        <div className="p-4 flex flex-col">
+      <div className="rounded-box border border-base-300 bg-base-100">
+        <div className="flex flex-col p-4">
           {/* Table Controls */}
-          <div className="flex justify-between items-center mb-3">
-            <div className="flex items-center text-xs text-slate-700">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm text-base-content">
               <span>Show</span>
-              <select 
-                className="mx-2 border border-slate-300 rounded-sm p-1 text-xs"
+              <select
+                className="select select-sm rounded-field"
                 value={pageSize}
                 onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
               >
@@ -223,10 +230,11 @@ export default function ServicesPage() {
               </select>
               <span>entries</span>
             </div>
-            <div className="flex items-center text-xs text-slate-700">
-              <span className="mr-2">Search:</span>
-              <Input
-                className="w-[180px] h-7 rounded-sm border-slate-300 focus-visible:ring-0 text-xs"
+            <div className="flex items-center gap-2 text-sm text-base-content">
+              <span>Search:</span>
+              <input
+                type="text"
+                className="input input-sm w-[180px] rounded-field"
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
               />
@@ -234,8 +242,8 @@ export default function ServicesPage() {
           </div>
 
           {/* Table */}
-          <div className="overflow-x-auto w-full border border-slate-300">
-            <table className="w-full text-[11px] min-w-[1200px] border-collapse bg-white">
+          <div className="w-full overflow-x-auto rounded-field border border-base-300">
+            <table className="table table-xs min-w-[1200px]">
               <thead>
                 <tr>
                   <TableHeader title="ID" />
@@ -250,14 +258,14 @@ export default function ServicesPage() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12 text-slate-500 border border-slate-200">
-                      <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-blue-500" />
+                    <td colSpan={7} className="py-12 text-center text-base-content/60">
+                      <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-primary" />
                       Loading...
                     </td>
                   </tr>
                 ) : paginatedData.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-8 text-slate-500 border border-slate-200">
+                    <td colSpan={7} className="py-8 text-center text-base-content/60">
                       No data available in table
                     </td>
                   </tr>
@@ -265,28 +273,28 @@ export default function ServicesPage() {
                   paginatedData.map((item: any, index: number) => {
                     const d = parseDate(item.created_at);
                     const dateStr = d ? d.toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).replace(',', '') : "—";
-                    
+
                     return (
-                      <tr key={item.id || index} className="hover:bg-blue-50/30 transition-colors">
-                        <td className="px-2 py-2 align-middle text-blue-600 font-medium bg-blue-100/50 border border-slate-200 w-[60px]">
+                      <tr key={item.id || index} className="hover:bg-base-200">
+                        <td className="w-[60px] font-medium text-primary">
                           {item.id || "—"}
                         </td>
-                        <td className="px-2 py-2 align-middle text-blue-500 font-medium cursor-pointer border border-slate-200">
+                        <td className="font-medium text-primary">
                           {item.title || "—"}
                         </td>
-                        <td className="px-2 py-2 align-middle text-slate-700 border border-slate-200">
+                        <td>
                           {item.category_details?.name || item.category_details?.full_name || (item.category_id ? `Category > ${item.category_id}` : "—")}
                         </td>
-                        <td className="px-2 py-2 align-middle text-slate-700 border border-slate-200">
+                        <td>
                           {item.assigned_group_details?.name || (item.assigned_group_id ? `Helpdesk Level ${item.assigned_group_id}` : "—")}
                         </td>
-                        <td className="px-2 py-2 align-middle text-slate-700 border border-slate-200">
+                        <td>
                           {item.assigned_user?.name || "—"}
                         </td>
-                        <td className="px-2 py-2 align-middle text-slate-700 border border-slate-200">
+                        <td>
                           {item.assigned_user?.lastname || ""}
                         </td>
-                        <td className="px-2 py-2 align-middle text-slate-700 border border-slate-200 w-[140px]">
+                        <td className="w-[140px] whitespace-nowrap">
                           {dateStr}
                         </td>
                       </tr>
@@ -299,26 +307,26 @@ export default function ServicesPage() {
 
           {/* Pagination Controls */}
           {!loading && (
-            <div className="flex justify-between items-center mt-3 text-[11px] text-slate-600">
-              <div>
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <div className="font-medium text-base-content">
                 Showing {totalEntries === 0 ? 0 : ((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, totalEntries)} of {totalEntries} entries
               </div>
-              <div className="flex items-center gap-0">
-                <button 
-                  onClick={() => setCurrentPage(1)} 
+              <div className="join">
+                <button
+                  onClick={() => setCurrentPage(1)}
                   disabled={currentPage === 1}
-                  className="px-2 hover:text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-slate-500"
+                  className="btn join-item btn-sm rounded-field font-medium text-base-content"
                 >
                   First
                 </button>
-                <button 
-                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} 
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                   disabled={currentPage === 1}
-                  className="px-2 hover:text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-slate-500"
+                  className="btn join-item btn-sm rounded-field font-medium text-base-content"
                 >
                   Previous
                 </button>
-                
+
                 {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                   let pageNum = currentPage;
                   if (totalPages <= 5) pageNum = i + 1;
@@ -330,24 +338,24 @@ export default function ServicesPage() {
                     <button
                       key={pageNum}
                       onClick={() => setCurrentPage(pageNum)}
-                      className={`px-3 py-1 font-medium ${currentPage === pageNum ? 'bg-blue-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                      className={`btn join-item btn-sm rounded-field font-medium ${currentPage === pageNum ? 'btn-primary' : 'text-base-content'}`}
                     >
                       {pageNum}
                     </button>
                   );
                 })}
 
-                <button 
-                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} 
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                   disabled={currentPage === totalPages}
-                  className="px-2 hover:text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-slate-500"
+                  className="btn join-item btn-sm rounded-field font-medium text-base-content"
                 >
                   Next
                 </button>
-                <button 
-                  onClick={() => setCurrentPage(totalPages)} 
+                <button
+                  onClick={() => setCurrentPage(totalPages)}
                   disabled={currentPage === totalPages}
-                  className="px-2 hover:text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-slate-500"
+                  className="btn join-item btn-sm rounded-field font-medium text-base-content"
                 >
                   Last
                 </button>

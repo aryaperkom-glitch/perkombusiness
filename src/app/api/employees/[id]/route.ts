@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { query, queryOne } from "@/lib/db";
 import { employeeSchema } from "@/lib/validations/employee";
 
 export async function PUT(
@@ -7,7 +7,6 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const supabase = createServiceClient();
   const body = await request.json();
 
   const result = employeeSchema.safeParse(body);
@@ -18,48 +17,50 @@ export async function PUT(
     );
   }
 
-  const { data, error } = await supabase
-    .from("employees")
-    .update({
-      employee_name: result.data.employee_name,
-      department: result.data.department,
-      phone_number: result.data.phone_number,
-      role: result.data.role,
-      manager_id: result.data.manager_id || null,
-      hr_id: result.data.hr_id || null
-    })
-    .eq("id", id)
-    .select()
-    .single();
+  try {
+    const data = await queryOne(
+      `UPDATE employees SET
+         employee_name = $1,
+         department = $2,
+         phone_number = $3,
+         role = $4,
+         manager_id = $5,
+         hr_id = $6
+       WHERE id = $7
+       RETURNING *`,
+      [
+        result.data.employee_name,
+        result.data.department,
+        result.data.phone_number,
+        result.data.role,
+        result.data.manager_id || null,
+        result.data.hr_id || null,
+        id,
+      ]
+    );
 
-  if (data && result.data.signature !== undefined) {
-    if (result.data.signature) {
-      const { error: sigError } = await supabase.from("signatures").upsert({
-        employee_id: data.id,
-        signature: result.data.signature,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'employee_id' });
-      
-      if (sigError) {
-        return NextResponse.json(
-          { success: false, error: "Gagal menyimpan tanda tangan: " + sigError.message },
-          { status: 500 }
+    if (data && result.data.signature !== undefined) {
+      if (result.data.signature) {
+        await query(
+          `INSERT INTO signatures (employee_id, signature, updated_at)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (employee_id) DO UPDATE
+             SET signature = EXCLUDED.signature, updated_at = EXCLUDED.updated_at`,
+          [data.id, result.data.signature, new Date().toISOString()]
         );
+      } else if (result.data.signature === null) {
+        // If signature is explicitly set to null, delete it
+        await query("DELETE FROM signatures WHERE employee_id = $1", [data.id]);
       }
-    } else if (result.data.signature === null) {
-      // If signature is explicitly set to null, delete it
-      await supabase.from("signatures").delete().eq("employee_id", data.id);
     }
-  }
 
-  if (error) {
+    return NextResponse.json({ success: true, data });
+  } catch (error) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: (error as Error).message },
       { status: 500 }
     );
   }
-
-  return NextResponse.json({ success: true, data });
 }
 
 export async function DELETE(
@@ -67,16 +68,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const supabase = createServiceClient();
 
-  const { error } = await supabase
-    .from("employees")
-    .update({ is_active: false })
-    .eq("id", id);
-
-  if (error) {
+  try {
+    await query("UPDATE employees SET is_active = false WHERE id = $1", [id]);
+  } catch (error) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: (error as Error).message },
       { status: 500 }
     );
   }

@@ -1,62 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { query, queryOne } from "@/lib/db";
 import { employeeSchema } from "@/lib/validations/employee";
 
 export async function GET(request: NextRequest) {
-  const supabase = createServiceClient();
   const { searchParams } = new URL(request.url);
   const search = searchParams.get("search") || "";
   const role = searchParams.get("role") || "";
 
-  let query = supabase
-    .from("employees")
-    .select("*")
-    .eq("is_active", true)
-    .order("employee_name", { ascending: true });
+  try {
+    const conditions: string[] = ["is_active = true"];
+    const params: unknown[] = [];
 
-  if (search) {
-    query = query.or(
-      `employee_name.ilike.%${search}%,employee_number.ilike.%${search}%`
+    if (search) {
+      params.push(`%${search}%`);
+      const p = params.length;
+      conditions.push(
+        `(employee_name ILIKE $${p} OR employee_number ILIKE $${p})`
+      );
+    }
+
+    if (role) {
+      params.push(role);
+      conditions.push(`role = $${params.length}`);
+    }
+
+    const { rows: data } = await query(
+      `SELECT * FROM employees
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY employee_name ASC`,
+      params
     );
-  }
 
-  if (role) {
-    query = query.eq("role", role);
-  }
+    const signaturesMap: Record<string, string> = {};
 
-  const { data, error } = await query;
+    // Try fetching signatures safely, so it doesn't break if the table doesn't exist yet
+    try {
+      const { rows: sigData } = await query(
+        "SELECT employee_id, signature FROM signatures"
+      );
+      sigData.forEach((s) => {
+        signaturesMap[s.employee_id] = s.signature;
+      });
+    } catch {
+      // Ignore error if table doesn't exist
+    }
 
-  if (error) {
+    const mappedData = data?.map((emp) => ({
+      ...emp,
+      signature: signaturesMap[emp.id] || null,
+    }));
+
+    return NextResponse.json({ success: true, data: mappedData });
+  } catch (error) {
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: (error as Error).message },
       { status: 500 }
     );
   }
-
-  let signaturesMap: Record<string, string> = {};
-  
-  // Try fetching signatures safely, so it doesn't break if the table doesn't exist yet
-  try {
-    const { data: sigData, error: sigError } = await supabase.from("signatures").select("employee_id, signature");
-    if (!sigError && sigData) {
-      sigData.forEach((s: any) => {
-        signaturesMap[s.employee_id] = s.signature;
-      });
-    }
-  } catch (e) {
-    // Ignore error if table doesn't exist
-  }
-
-  const mappedData = data?.map((emp: any) => ({
-    ...emp,
-    signature: signaturesMap[emp.id] || null,
-  }));
-
-  return NextResponse.json({ success: true, data: mappedData });
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = createServiceClient();
   const body = await request.json();
 
   const result = employeeSchema.safeParse(body);
@@ -67,46 +70,54 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { data, error } = await supabase
-    .from("employees")
-    .insert({
-      employee_number: result.data.employee_number,
-      employee_name: result.data.employee_name,
-      department: result.data.department,
-      phone_number: result.data.phone_number,
-      role: result.data.role,
-      manager_id: result.data.manager_id || null,
-      hr_id: result.data.hr_id || null
-    })
-    .select()
-    .single();
-
-  if (data && result.data.signature) {
-    const { error: sigError } = await supabase.from("signatures").upsert({
-      employee_id: data.id,
-      signature: result.data.signature,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'employee_id' });
-
-    if (sigError) {
-      return NextResponse.json(
-        { success: false, error: "Gagal menyimpan tanda tangan: " + sigError.message },
-        { status: 500 }
-      );
-    }
-  }
-
-  if (error) {
-    if (error.code === "23505") {
+  let data = null;
+  try {
+    data = await queryOne(
+      `INSERT INTO employees
+         (employee_number, employee_name, department, phone_number, role, manager_id, hr_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [
+        result.data.employee_number,
+        result.data.employee_name,
+        result.data.department,
+        result.data.phone_number,
+        result.data.role,
+        result.data.manager_id || null,
+        result.data.hr_id || null,
+      ]
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") {
       return NextResponse.json(
         { success: false, error: "Employee number sudah digunakan" },
         { status: 409 }
       );
     }
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: (error as Error).message },
       { status: 500 }
     );
+  }
+
+  if (data && result.data.signature) {
+    try {
+      await query(
+        `INSERT INTO signatures (employee_id, signature, updated_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (employee_id) DO UPDATE
+           SET signature = EXCLUDED.signature, updated_at = EXCLUDED.updated_at`,
+        [data.id, result.data.signature, new Date().toISOString()]
+      );
+    } catch (error) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Gagal menyimpan tanda tangan: " + (error as Error).message,
+        },
+        { status: 500 }
+      );
+    }
   }
 
   return NextResponse.json({ success: true, data });

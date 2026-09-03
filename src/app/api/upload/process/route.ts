@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@/lib/supabase-server";
+import { getSessionUserId } from "@/lib/auth";
+import { readFileFromStorage } from "@/lib/storage";
+import { query, queryOne } from "@/lib/db";
 import { parseGrabCSV, parseGrabPDF, groupTripsByEmployee } from "@/lib/parser";
 
 export async function POST(request: NextRequest) {
-  const supabase = await createServerClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const userId = await getSessionUserId();
 
-  if (authError || !user) {
+  if (!userId) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401 }
@@ -23,25 +24,22 @@ export async function POST(request: NextRequest) {
   }
 
   // Get upload record
-  const { data: upload, error: uploadError } = await supabase
-    .from("uploads")
-    .select("*")
-    .eq("id", upload_id)
-    .single();
+  const upload = await queryOne("SELECT * FROM uploads WHERE id = $1", [
+    upload_id,
+  ]);
 
-  if (uploadError || !upload) {
+  if (!upload) {
     return NextResponse.json(
       { success: false, error: "Upload tidak ditemukan" },
       { status: 404 }
     );
   }
 
-  // Download file from storage
-  const { data: fileData, error: downloadError } = await supabase.storage
-    .from("dataperkom")
-    .download(upload.storage_path);
-
-  if (downloadError || !fileData) {
+  // Load file from the uploads volume
+  let buffer: Buffer;
+  try {
+    buffer = await readFileFromStorage(upload.storage_path);
+  } catch {
     return NextResponse.json(
       { success: false, error: "Gagal mengunduh file" },
       { status: 500 }
@@ -50,18 +48,15 @@ export async function POST(request: NextRequest) {
 
   try {
     // Get all employees for matching
-    const { data: employees } = await supabase
-      .from("employees")
-      .select("*")
-      .eq("is_active", true);
+    const { rows: employees } = await query(
+      "SELECT * FROM employees WHERE is_active = true"
+    );
 
     // Parse the file
     let trips;
     if (upload.file_type === "csv") {
-      const text = await fileData.text();
-      trips = parseGrabCSV(text);
+      trips = parseGrabCSV(buffer.toString("utf-8"));
     } else {
-      const buffer = Buffer.from(await fileData.arrayBuffer());
       trips = await parseGrabPDF(buffer, employees || []);
     }
 
@@ -86,25 +81,30 @@ export async function POST(request: NextRequest) {
       );
 
       // Create claim
-      const { data: claim, error: claimError } = await supabase
-        .from("claims")
-        .insert({
-          employee_id: matchedEmployee?.id || null,
-          upload_id: upload.id,
-          period: upload.period,
-          trip_count: group.trip_count,
-          total_amount: group.total_amount,
-          status: matchedEmployee ? "PENDING" : "UNMATCHED",
-          manager_id: matchedEmployee?.manager_id || null,
-          hr_id: matchedEmployee?.hr_id || null,
-        })
-        .select()
-        .single();
-
-      if (claimError || !claim) {
+      let claim = null;
+      try {
+        claim = await queryOne(
+          `INSERT INTO claims
+             (employee_id, upload_id, period, trip_count, total_amount, status, manager_id, hr_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           RETURNING *`,
+          [
+            matchedEmployee?.id || null,
+            upload.id,
+            upload.period,
+            group.trip_count,
+            group.total_amount,
+            matchedEmployee ? "PENDING" : "UNMATCHED",
+            matchedEmployee?.manager_id || null,
+            matchedEmployee?.hr_id || null,
+          ]
+        );
+      } catch (claimError) {
         console.error("Failed to insert claim:", claimError);
         continue;
       }
+
+      if (!claim) continue;
 
       // Create trips
       const tripRecords = group.trips.map((t) => ({
@@ -122,19 +122,44 @@ export async function POST(request: NextRequest) {
         fare: t.fare,
       }));
 
-      const { error: tripsError } = await supabase.from("trips").insert(tripRecords);
-      if (tripsError) {
+      try {
+        const values = tripRecords
+          .map((_, i) => {
+            const b = i * 10;
+            return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10})`;
+          })
+          .join(", ");
+        const params = tripRecords.flatMap((t) => [
+          t.claim_id,
+          t.trip_date,
+          t.booking_id,
+          t.service_type,
+          t.payment_method,
+          t.employee_group,
+          t.cost_code,
+          t.pickup,
+          t.dropoff,
+          t.fare,
+        ]);
+
+        await query(
+          `INSERT INTO trips
+             (claim_id, trip_date, booking_id, service_type, payment_method,
+              employee_group, cost_code, pickup, dropoff, fare)
+           VALUES ${values}`,
+          params
+        );
+      } catch (tripsError) {
         console.error("Failed to insert trips:", tripsError);
       }
-      
+
       claimsCreated++;
     }
 
     // Update upload status
-    await supabase
-      .from("uploads")
-      .update({ status: "PROCESSED" })
-      .eq("id", upload_id);
+    await query("UPDATE uploads SET status = 'PROCESSED' WHERE id = $1", [
+      upload_id,
+    ]);
 
     return NextResponse.json({
       success: true,

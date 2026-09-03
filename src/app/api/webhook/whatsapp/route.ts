@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { query } from "@/lib/db";
+import { getClaimWithRelations, listActiveClaims } from "@/lib/claims";
+import type { Trip } from "@/types";
 import {
   sendTextMessage,
   buildDetailMessage,
@@ -15,25 +17,8 @@ function normalizePhone(phone: string | undefined | null) {
   return phone.replace(/^\+/, "").replace(/^0/, "62").replace("@lid", "");
 }
 
-// Helper: fetch a fresh claim with all relations
-async function fetchClaimFresh(supabase: ReturnType<typeof createServiceClient>, claimId: string) {
-  const { data } = await supabase
-    .from("claims")
-    .select(`
-      *,
-      employee:employees!claims_employee_id_fkey(*),
-      manager:employees!claims_manager_id_fkey(*),
-      hr:employees!claims_hr_id_fkey(*),
-      trips(*)
-    `)
-    .eq("id", claimId)
-    .single();
-  return data;
-}
-
 // Helper: send WA and log result
 async function sendAndLog(
-  supabase: ReturnType<typeof createServiceClient>,
   claimId: string,
   phone: string,
   message: string,
@@ -41,13 +26,17 @@ async function sendAndLog(
 ): Promise<boolean> {
   const result = await sendTextMessage(phone, message);
 
-  await supabase.from("whatsapp_logs").insert({
-    claim_id: claimId,
-    phone_number: phone,
-    message_type: messageType,
-    status: result.success ? "SENT" : "FAILED",
-    response: result.success ? message.slice(0, 200) : (result.error || "Unknown error"),
-  });
+  await query(
+    `INSERT INTO whatsapp_logs (claim_id, phone_number, message_type, status, response)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [
+      claimId,
+      phone,
+      messageType,
+      result.success ? "SENT" : "FAILED",
+      result.success ? message.slice(0, 200) : (result.error || "Unknown error"),
+    ]
+  );
 
   if (!result.success) {
     console.error(`[WA] FAILED to send ${messageType} to ${phone} for claim ${claimId}: ${result.error}`);
@@ -58,15 +47,14 @@ async function sendAndLog(
 
 // Helper: proceed to HR approval or auto-finalize
 async function proceedToHrOrFinalize(
-  supabase: ReturnType<typeof createServiceClient>,
-  claim: NonNullable<Awaited<ReturnType<typeof fetchClaimFresh>>>,
+  claim: NonNullable<Awaited<ReturnType<typeof getClaimWithRelations>>>,
   employeePhone: string | null
 ) {
   if (claim.hr) {
     const hrPhone = normalizePhone(claim.hr.phone_number);
     if (hrPhone) {
       const sent = await sendAndLog(
-        supabase, claim.id, hrPhone,
+        claim.id, hrPhone,
         buildHrApprovalMessage({
           employee_name: claim.employee?.employee_name || "Karyawan",
           manager_name: claim.manager?.employee_name || "Manager",
@@ -84,10 +72,13 @@ async function proceedToHrOrFinalize(
     }
   } else {
     // No HR → auto finalize
-    await supabase.from("claims").update({ status: "APPROVED", hr_status: "APPROVED" }).eq("id", claim.id);
+    await query(
+      "UPDATE claims SET status = 'APPROVED', hr_status = 'APPROVED' WHERE id = $1",
+      [claim.id]
+    );
     if (employeePhone) {
       await sendAndLog(
-        supabase, claim.id, employeePhone,
+        claim.id, employeePhone,
         buildEmployeeStatusUpdateMessage("FINALIZED", "Sistem", "HR"),
         "EMPLOYEE_STATUS_UPDATE"
       );
@@ -96,15 +87,14 @@ async function proceedToHrOrFinalize(
 }
 
 // ==========================================
-// Main processing logic (runs in background via after())
+// Main processing logic
 // ==========================================
 async function processWebhookReply(
-  claim: NonNullable<Awaited<ReturnType<typeof fetchClaimFresh>>>,
+  claim: NonNullable<Awaited<ReturnType<typeof getClaimWithRelations>>>,
   role: string,
   reply: string,
   phoneNumber: string,
 ) {
-  const supabase = createServiceClient();
   const employeePhone = normalizePhone(claim.employee?.phone_number);
 
   try {
@@ -114,22 +104,25 @@ async function processWebhookReply(
     if (role === 'EMPLOYEE') {
       if (reply === "1") {
         const hasManager = !!claim.manager;
-        await supabase.from("claims").update({
-          approved_at: new Date().toISOString(),
-          manager_status: hasManager ? "PENDING" : "APPROVED",
-          hr_status: "PENDING",
-        }).eq("id", claim.id);
+        await query(
+          `UPDATE claims SET
+             approved_at = $1,
+             manager_status = $2,
+             hr_status = 'PENDING'
+           WHERE id = $3`,
+          [new Date().toISOString(), hasManager ? "PENDING" : "APPROVED", claim.id]
+        );
 
         const confirmMsg = buildConfirmationMessage(hasManager ? claim.manager.employee_name : undefined);
         if (employeePhone) {
-          await sendAndLog(supabase, claim.id, employeePhone, confirmMsg, "EMPLOYEE_CONFIRMATION");
+          await sendAndLog(claim.id, employeePhone, confirmMsg, "EMPLOYEE_CONFIRMATION");
         }
 
         if (hasManager) {
           const mgrPhone = normalizePhone(claim.manager.phone_number);
           if (mgrPhone) {
             const sent = await sendAndLog(
-              supabase, claim.id, mgrPhone,
+              claim.id, mgrPhone,
               buildManagerApprovalMessage({
                 employee_name: claim.employee.employee_name,
                 period: claim.period,
@@ -143,28 +136,43 @@ async function processWebhookReply(
             }
           }
         } else {
-          await supabase.from("claims").update({ manager_status: "APPROVED" }).eq("id", claim.id);
-          const freshClaim = await fetchClaimFresh(supabase, claim.id);
+          await query(
+            "UPDATE claims SET manager_status = 'APPROVED' WHERE id = $1",
+            [claim.id]
+          );
+          const freshClaim = await getClaimWithRelations(claim.id);
           if (freshClaim) {
-            await proceedToHrOrFinalize(supabase, freshClaim, employeePhone);
+            await proceedToHrOrFinalize(freshClaim, employeePhone);
           }
         }
 
       } else if (reply === "2") {
-        await supabase.from("claims").update({ status: "NEED_REVIEW" }).eq("id", claim.id);
+        await query(
+          "UPDATE claims SET status = 'NEED_REVIEW' WHERE id = $1",
+          [claim.id]
+        );
         if (employeePhone) {
-          await sendAndLog(supabase, claim.id, employeePhone, buildCorrectionPrompt(), "CORRECTION_PROMPT");
+          await sendAndLog(claim.id, employeePhone, buildCorrectionPrompt(), "CORRECTION_PROMPT");
         }
       } else if (reply === "3") {
-        const { data: trips } = await supabase.from("trips").select("*").eq("claim_id", claim.id).order("trip_date", { ascending: true });
+        const { rows: trips } = await query(
+          "SELECT * FROM trips WHERE claim_id = $1 ORDER BY trip_date ASC",
+          [claim.id]
+        );
         if (trips && trips.length > 0 && employeePhone) {
-          await sendAndLog(supabase, claim.id, employeePhone, buildDetailMessage(trips, claim.total_amount), "DETAIL_MESSAGE");
+          await sendAndLog(claim.id, employeePhone, buildDetailMessage(trips as Trip[], claim.total_amount), "DETAIL_MESSAGE");
         }
       } else {
         if (claim.status === "NEED_REVIEW" || reply.length > 5) {
-          await supabase.from("comments").insert({ claim_id: claim.id, message: reply });
+          await query(
+            "INSERT INTO comments (claim_id, message) VALUES ($1, $2)",
+            [claim.id, reply]
+          );
           if (claim.status !== "NEED_REVIEW") {
-            await supabase.from("claims").update({ status: "NEED_REVIEW" }).eq("id", claim.id);
+            await query(
+              "UPDATE claims SET status = 'NEED_REVIEW' WHERE id = $1",
+              [claim.id]
+            );
           }
         }
       }
@@ -175,34 +183,40 @@ async function processWebhookReply(
     // ==========================================
     else if (role === 'MANAGER') {
       if (reply === "1") {
-        await supabase.from("claims").update({ manager_status: "APPROVED" }).eq("id", claim.id);
-        await sendAndLog(supabase, claim.id, phoneNumber, "Terima kasih, klaim telah Anda setujui.", "MANAGER_CONFIRMED");
+        await query(
+          "UPDATE claims SET manager_status = 'APPROVED' WHERE id = $1",
+          [claim.id]
+        );
+        await sendAndLog(claim.id, phoneNumber, "Terima kasih, klaim telah Anda setujui.", "MANAGER_CONFIRMED");
 
         if (employeePhone) {
           await sendAndLog(
-            supabase, claim.id, employeePhone,
+            claim.id, employeePhone,
             buildEmployeeStatusUpdateMessage("APPROVED", claim.manager?.employee_name || "Manager", "MANAGER"),
             "EMPLOYEE_STATUS_UPDATE"
           );
         }
 
-        const freshClaim = await fetchClaimFresh(supabase, claim.id);
+        const freshClaim = await getClaimWithRelations(claim.id);
         if (freshClaim) {
-          await proceedToHrOrFinalize(supabase, freshClaim, employeePhone);
+          await proceedToHrOrFinalize(freshClaim, employeePhone);
         }
 
       } else if (reply === "2") {
-        await supabase.from("claims").update({ manager_status: "REJECTED", status: "NEED_REVIEW" }).eq("id", claim.id);
-        await sendAndLog(supabase, claim.id, phoneNumber, "Klaim telah ditolak.", "MANAGER_REJECTED");
+        await query(
+          "UPDATE claims SET manager_status = 'REJECTED', status = 'NEED_REVIEW' WHERE id = $1",
+          [claim.id]
+        );
+        await sendAndLog(claim.id, phoneNumber, "Klaim telah ditolak.", "MANAGER_REJECTED");
         if (employeePhone) {
           await sendAndLog(
-            supabase, claim.id, employeePhone,
+            claim.id, employeePhone,
             buildEmployeeStatusUpdateMessage("REJECTED", claim.manager?.employee_name || "Manager", "MANAGER"),
             "EMPLOYEE_STATUS_UPDATE"
           );
         }
       } else {
-        await sendAndLog(supabase, claim.id, phoneNumber, "Balasan tidak valid. Silakan balas 1 untuk Approve atau 2 untuk Reject.", "INVALID_REPLY");
+        await sendAndLog(claim.id, phoneNumber, "Balasan tidak valid. Silakan balas 1 untuk Approve atau 2 untuk Reject.", "INVALID_REPLY");
       }
     }
 
@@ -211,38 +225,42 @@ async function processWebhookReply(
     // ==========================================
     else if (role === 'HR') {
       if (reply === "1") {
-        await supabase.from("claims").update({ hr_status: "APPROVED", status: "APPROVED" }).eq("id", claim.id);
-        await sendAndLog(supabase, claim.id, phoneNumber, "Terima kasih, klaim telah selesai Anda setujui.", "HR_CONFIRMED");
+        await query(
+          "UPDATE claims SET hr_status = 'APPROVED', status = 'APPROVED' WHERE id = $1",
+          [claim.id]
+        );
+        await sendAndLog(claim.id, phoneNumber, "Terima kasih, klaim telah selesai Anda setujui.", "HR_CONFIRMED");
         if (employeePhone) {
           await sendAndLog(
-            supabase, claim.id, employeePhone,
+            claim.id, employeePhone,
             buildEmployeeStatusUpdateMessage("FINALIZED", claim.hr?.employee_name || "HR", "HR"),
             "EMPLOYEE_STATUS_UPDATE"
           );
         }
       } else if (reply === "2") {
-        await supabase.from("claims").update({ hr_status: "REJECTED", status: "NEED_REVIEW" }).eq("id", claim.id);
-        await sendAndLog(supabase, claim.id, phoneNumber, "Klaim telah ditolak.", "HR_REJECTED");
+        await query(
+          "UPDATE claims SET hr_status = 'REJECTED', status = 'NEED_REVIEW' WHERE id = $1",
+          [claim.id]
+        );
+        await sendAndLog(claim.id, phoneNumber, "Klaim telah ditolak.", "HR_REJECTED");
         if (employeePhone) {
           await sendAndLog(
-            supabase, claim.id, employeePhone,
+            claim.id, employeePhone,
             buildEmployeeStatusUpdateMessage("REJECTED", claim.hr?.employee_name || "HR", "HR"),
             "EMPLOYEE_STATUS_UPDATE"
           );
         }
       } else {
-        await sendAndLog(supabase, claim.id, phoneNumber, "Balasan tidak valid. Silakan balas 1 untuk Approve atau 2 untuk Reject.", "INVALID_REPLY");
+        await sendAndLog(claim.id, phoneNumber, "Balasan tidak valid. Silakan balas 1 untuk Approve atau 2 untuk Reject.", "INVALID_REPLY");
       }
     }
 
     // Log the interaction
-    await supabase.from("whatsapp_logs").insert({
-      claim_id: claim.id,
-      phone_number: phoneNumber,
-      message_type: `${role}_REPLY`,
-      status: "RECEIVED",
-      response: reply,
-    });
+    await query(
+      `INSERT INTO whatsapp_logs (claim_id, phone_number, message_type, status, response)
+       VALUES ($1, $2, $3, 'RECEIVED', $4)`,
+      [claim.id, phoneNumber, `${role}_REPLY`, reply]
+    );
 
   } catch (error) {
     console.error(`[FLOW] Error processing ${role} reply for claim ${claim.id}:`, error);
@@ -255,17 +273,14 @@ async function processWebhookReply(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const supabase = createServiceClient();
 
     // Log raw payload
     try {
-      await supabase.from("whatsapp_logs").insert({
-        claim_id: "1aedea14-57ef-4929-8d27-f6b8b513cbe0",
-        phone_number: "SYSTEM",
-        message_type: "RAW_WEBHOOK",
-        status: "RECEIVED",
-        response: JSON.stringify(body),
-      });
+      await query(
+        `INSERT INTO whatsapp_logs (claim_id, phone_number, message_type, status, response)
+         VALUES ($1, 'SYSTEM', 'RAW_WEBHOOK', 'RECEIVED', $2)`,
+        ["1aedea14-57ef-4929-8d27-f6b8b513cbe0", JSON.stringify(body)]
+      );
     } catch (e) {
       console.error("Log error", e);
     }
@@ -289,17 +304,7 @@ export async function POST(request: NextRequest) {
     if (!phoneNumber) return NextResponse.json({ success: true });
 
     // Fetch active claims
-    const { data: claims } = await supabase
-      .from("claims")
-      .select(`
-        *,
-        employee:employees!claims_employee_id_fkey(*),
-        manager:employees!claims_manager_id_fkey(*),
-        hr:employees!claims_hr_id_fkey(*),
-        trips(*)
-      `)
-      .in("status", ["SENT", "NEED_REVIEW"])
-      .order("wa_sent_at", { ascending: false });
+    const claims = await listActiveClaims();
 
     if (!claims || claims.length === 0) {
       return NextResponse.json({ success: true, reason: "No active claims" });

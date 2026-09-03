@@ -30,8 +30,8 @@
 # runtime storage: uploads + backups — data, never commit
 /storage
 
-# database migration backups (contain data — never commit)
-/db-backup
+# db-backup: committed temporarily for VPS seed migration (re-ignore after restore)
+# /db-backup
 
 # debug
 npm-debug.log*
